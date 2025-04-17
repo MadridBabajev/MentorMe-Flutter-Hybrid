@@ -16,6 +16,7 @@ class AppRoutes {
   static const String availabilities = "/availabilities";
   static const String paymentMethods = "/payment-methods";
   static const String bankingDetails = "/banking-details";
+  static const String mlFeatures = "/ml-features";
   static const String inbox = "/inbox";
 
   const AppRoutes._();

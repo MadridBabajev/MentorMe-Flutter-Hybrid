@@ -1,57 +1,141 @@
-import 'package:tflite_flutter/tflite_flutter.dart';
+import 'dart:convert';
+import 'dart:math' as math;
+import 'package:flutter/services.dart';
+// import 'package:tokenizers/tokenizers.dart';
+import 'package:mentor_me/litert_flutter.dart';
 
-/// A service that loads and runs inference using a T5-based summarization model.
-/// Because T5 typically requires dynamic shapes & text tokenization, you’ll have
-/// to carefully handle the input sequence. This example is minimal, focusing on
-/// loading the TFLite model and providing a placeholder function to illustrate.
 class LocalSummarizerModelService {
-  late Interpreter _interpreter;
-  bool _isModelLoaded = false;
-  bool _isRunningInference = false;
+  final _liteRt = LiteRtFlutter();
+  // late final SentencePieceProcessor _sp;
+  bool _isLoaded = false;
+  bool _isRunning = false;
 
-  Future<void> loadModel({String modelAssetPath = 'assets/ml_models/summarization/summarization_model.tflite'}) async {
-    if (_isModelLoaded) return;
+  /// Call once to init LiteRT & load model + tokenizer.
+  Future<void> loadModel({
+    String modelAssetPath = 'assets/ml_models/summarization/summarization_model.tflite',
+    String spModelAssetPath = 'assets/ml_models/summarization/sentencepiece.bpe.model',
+  }) async {
+    if (_isLoaded) return;
+    // 1) LiteRT init & model load
+    await _liteRt.initialize();
+    await _liteRt.loadModel(modelAssetPath);
+    //
+    // // 2) load tokenizer JSON via `tokenizers` package
+    // //    (that supports your T5 SentencePiece vocab + merges)
+    // _sp = SentencePieceProcessor();
+    // final spData = await rootBundle.load(spModelAssetPath);
+    // _sp.loadFromBuffer(spData.buffer.asUint8List());
 
-    try {
-      _interpreter = await Interpreter.fromAsset(modelAssetPath, options: InterpreterOptions());
-      _isModelLoaded = true;
-    } catch (e) {
-      rethrow;
-    }
+    _isLoaded = true;
   }
 
-  bool get isModelLoaded => _isModelLoaded;
-  bool get isRunningInference => _isRunningInference;
+  bool get isModelLoaded => _isLoaded;
+  bool get isRunningInference => _isRunning;
 
-  /// Summarize the given text. In reality, you need to:
-  /// 1) Tokenize the text to input IDs.
-  /// 2) Provide those input IDs and possibly additional parameters (like attention mask) to the T5 model.
-  /// 3) Interpret the output IDs and convert them back to text.
-  ///
-  /// This is placeholder logic because T5 with TFLite can require quite some advanced bridging.
-  Future<String> summarizeText(String inputText) async {
-    if (!_isModelLoaded) {
-      throw Exception('Summarization model is not loaded. Call loadModel() first.');
-    }
-    _isRunningInference = true;
-    try {
-      final maxTokens = 256;
-      final inputIds = List<int>.filled(maxTokens, 0); // Not real tokens
-      final input = [inputIds]; // shape [1, 256]
+  /// Summarize a single chunk with greedy iterative decoding.
+  // Future<String> summarizeText(
+  //     String inputText, {
+  //       int maxNewTokens = 50,
+  //       int maxInputTokens = 512,
+  //     }) async {
+  //   if (!_isLoaded) {
+  //     throw Exception('Summarization model not loaded. Call loadModel() first.');
+  //   }
+  //   _isRunning = true;
+  //
+  //   try {
+  //     // 1) prefix & tokenize
+  //     final prompt = 'summarize: $inputText';
+  //     List<int> inputIds = _sp.encodeAsIds(prompt);
+  //     if (inputIds.length > maxInputTokens) inputIds = inputIds.sublist(0, maxInputTokens);
+  //     final List<int> attentionMask = List.filled(inputIds.length, 1);
+  //
+  //     // 2) prepare decoder start
+  //     final padId = _sp.pieceToId('<pad>');
+  //     final eosId = _sp.pieceToId('</s>');
+  //     List<int> outputIds = [padId];
+  //     final vocabSize = _sp.getPieceSize();
+  //
+  //     // 3) decode loop
+  //     for (var step = 0; step < maxNewTokens; step++) {
+  //       // flatten encIds + mask + decIds into one buffer
+  //       final flatInput = <double>[
+  //         ...inputIds.map((i) => i.toDouble()),
+  //         ...attentionMask.map((i) => i.toDouble()),
+  //         ...outputIds.map((i) => i.toDouble()),
+  //       ];
+  //
+  //       // input shape: [1, totalLen]
+  //       final List<int> inShape = <int>[1, flatInput.length];
+  //
+  //       // output shape: [1, 1, vocabSize]
+  //       final List<int> outShape = <int>[1, 1, vocabSize];
+  //
+  //       final List<double> rawOut = await _liteRt.runInference(
+  //         input: flatInput,
+  //         inShape: inShape,
+  //         outShape: outShape,
+  //       );
+  //
+  //       // take the slice corresponding to the last decoder step
+  //       final int start = (outputIds.length - 1) * vocabSize as int;
+  //       final int end = start + vocabSize as int;
+  //       final slice = rawOut.sublist(start, end);
+  //
+  //       // pick max index
+  //       var maxVal = double.negativeInfinity;
+  //       var maxIdx = 0;
+  //       for (var i = 0; i < slice.length; i++) {
+  //         if (slice[i] > maxVal) {
+  //           maxVal = slice[i];
+  //           maxIdx = i;
+  //         }
+  //       }
+  //
+  //       // stop on EOS
+  //       if (maxIdx == eosId) break;
+  //       outputIds.add(maxIdx);
+  //     }
+  //
+  //     // 4) decode tokens → text (skip initial pad)
+  //     return _sp.decodeIds(outputIds.sublist(1));
+  //   } finally {
+  //     _isRunning = false;
+  //   }
+  // }
 
-      final outputShape = [1, 64];
-      final output = List.filled(1 * 64, 0).reshape([1, 64]);
-
-      _interpreter.run(input, output);
-
-      return "This is a placeholder TFLite-based summary of your text.";
-    } finally {
-      _isRunningInference = false;
-    }
-  }
-
-  /// A convenience method to handle chunking if input text is large.
-  Future<String> chunkAndSummarize(String inputText) async {
-    return summarizeText(inputText);
-  }
+  /// If input longer than maxInputTokens, chunk & re-summarize.
+  // Future<String> chunkAndSummarize(
+  //     String inputText, {
+  //       int maxInputTokens = 256,
+  //       int summaryTokens = 50,
+  //     }) async {
+  //   if (!_isLoaded) {
+  //     throw Exception('Load model first.');
+  //   }
+  //   List<int> inputIds = _sp.encodeAsIds(inputText);
+  //
+  //   final parts = <String>[];
+  //   for (var start = 0; start < inputIds.length; start += maxInputTokens) {
+  //     final end = math.min(start + maxInputTokens, inputIds.length);
+  //     final subIds = inputIds.sublist(start, end);
+  //     final chunkText = _sp.decodeIds(subIds.sublist(1));
+  //     parts.add(await summarizeText(
+  //       chunkText,
+  //       maxNewTokens: summaryTokens,
+  //       maxInputTokens: maxInputTokens,
+  //     ));
+  //   }
+  //   // final merge
+  //   return summarizeText(
+  //     parts.join(' '),
+  //     maxNewTokens: summaryTokens,
+  //     maxInputTokens: maxInputTokens,
+  //   );
+  // }
+  Future<String> chunkAndSummarize(
+      String inputText, {
+        int maxInputTokens = 256,
+        int summaryTokens = 50,
+      }) async { throw Exception('Not implemented'); }
 }

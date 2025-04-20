@@ -1,23 +1,16 @@
 import 'dart:io';
-import 'dart:typed_data';
-import 'package:flutter/services.dart';
 import 'package:image/image.dart' as img;
-import 'package:mentor_me/common/logger/logger.dart';
-import 'package:tflite_flutter/tflite_flutter.dart';
+import 'package:mentor_me/litert_flutter.dart';
 
-/// Simple bounding box class for line detection.
+/// Simple bounding box for line detection.
 class RectBox {
-  final int x;
-  final int y;
-  final int width;
-  final int height;
-
+  final int x, y, width, height;
   RectBox(this.x, this.y, this.width, this.height);
 }
 
 class LocalOcrModelService {
-  late Interpreter _interpreter;
-  bool _isModelLoaded = false;
+  final _liteRt = LiteRtFlutter();
+  bool _isLoaded = false;
   bool _isRunningInference = false;
 
   // Map your model's predicted integer IDs to characters
@@ -43,79 +36,61 @@ class LocalOcrModelService {
   // Adjust if your model's blank token is a different index
   final int _blankIndex = 0;
 
-  /// Loads the OCR model from assets if not already loaded.
-  Future<void> loadModel({
-    String modelAssetPath = 'assets/ml_models/ocr/ocr_model.tflite',
-  }) async {
-    if (_isModelLoaded) return;
-
-    try {
-      final options = InterpreterOptions();
-      // options.addDelegate(FlexDelegate());
-      _interpreter = await Interpreter.fromAsset(modelAssetPath, options: options);
-      _interpreter.allocateTensors();
-
-      _isModelLoaded = true;
-    } catch (e) {
-      rethrow;
-    }
+  /// Initialize LiteRT runtime & load your .tflite from assets.
+  Future<void> loadModel({String assetPath = 'assets/ml_models/ocr/ocr_model.tflite'}) async {
+    if (_isLoaded) return;
+    await _liteRt.initialize();
+    await _liteRt.loadModel(assetPath);
+    _isLoaded = true;
   }
 
-  bool get isModelLoaded => _isModelLoaded;
+  bool get isModelLoaded => _isLoaded;
   bool get isRunningInference => _isRunningInference;
 
-  /// Accepts an image File, detects lines, runs inference on each line,
-  /// and returns recognized text per line.
+  /// Runs OCR: line‑detect → crop/resize → runInference → CTC decode
   Future<List<String>> extractHandwrittenText(File imageFile) async {
-    if (!_isModelLoaded) throw Exception('OCR model is not loaded. Call loadModel() first.');
+    if (!_isLoaded) {
+      throw Exception('OCR model not loaded. Call loadModel() first.');
+    }
     _isRunningInference = true;
 
     try {
-      // 1) Decode into an in-memory Image object from 'package:image'.
+      // 1) Decode image
       final bytes = await imageFile.readAsBytes();
-      final rawImage = img.decodeImage(bytes);
-      if (rawImage == null) {
-        throw Exception('Could not decode image.');
-      }
+      final raw = img.decodeImage(bytes);
+      if (raw == null) throw Exception('Could not decode image.');
 
-      // 2) Detect lines (placeholder approach)
-      final lineBoxes = _detectLinesPlaceholder(rawImage);
+      // 2) Simple horizontal‑projection line detector
+      final boxes = _detectLinesPlaceholder(raw);
 
-      // 3) For each bounding box, crop, resize, run inference, decode
+      // 3) For each line: preprocess, run, decode
       final results = <String>[];
-      for (final box in lineBoxes) {
-        // Crop region
-        final cropped = img.copyCrop(rawImage, box.x, box.y, box.width, box.height);
+      for (final box in boxes) {
+        final cropped = img.copyCrop(raw, box.x, box.y, box.width, box.height);
 
-        // Resize to 800 x 128 (width x height)
-        final resized = img.copyResize(
-          cropped,
-          width: 800,
-          height: 128,
+        // resize → 800×128, grayscale
+        final resized = img.copyResize(cropped, width: 800, height: 128);
+        final gray = img.grayscale(resized);
+
+        // flatten into float list [1,128,800,1]
+        final input = _buildInputList(gray);
+        final inShape = [1, 128, 800, 1];
+
+        // compute output shape: timeSteps = 800/16 = 50, vocabSize = charMap+blank
+        final timeSteps = 800 ~/ 16;
+        final vocabSize = _charMap.length + 1;
+        final outShape = [1, timeSteps, vocabSize];
+
+        // run inference via LiteRT
+        final flatOut = await _liteRt.runInference(
+          input: input,
+          inShape: inShape,
+          outShape: outShape,
         );
 
-        // Convert to grayscale
-        final grayscale = img.grayscale(resized);
-
-        // Preprocess for model input
-        final inputTensor = _buildInputTensor(grayscale);
-
-        // Build output buffer
-        final outputShape = _interpreter.getOutputTensor(0).shape;
-        final outputBuffer = List.filled(
-          outputShape[1] * outputShape[2],
-          0.0,
-        ).reshape([1, outputShape[1], outputShape[2]]);
-
-        // Run inference
-        _interpreter.run(inputTensor, outputBuffer);
-
-        // Greedy decode
-        final decoded = _ctcGreedyDecode(
-          outputBuffer as List<List<List<double>>>,
-          outputShape,
-        );
-        results.add(decoded);
+        // reshape and decode
+        final output3d = _reshapeFlatTo3D(flatOut, timeSteps, vocabSize);
+        results.add(_ctcGreedyDecode(output3d, timeSteps, vocabSize));
       }
 
       return results;
@@ -124,102 +99,96 @@ class LocalOcrModelService {
     }
   }
 
-  /// A placeholder line detector that scans horizontally for "dark" rows.
-  /// Replace with your real morphological or contour-based approach if desired.
+  // Simple line detector (same as before) :contentReference[oaicite:0]{index=0}&#8203;:contentReference[oaicite:1]{index=1}
   List<RectBox> _detectLinesPlaceholder(img.Image image) {
-    final down = img.copyResize(image, width: image.width, height: image.height ~/ 2);
-    final width = down.width;
-    final height = down.height;
+    final down = img.copyResize(image,
+        width: image.width, height: image.height ~/ 2);
+    final w = down.width, h = down.height;
+    final rowInk = List<int>.filled(h, 0);
 
-    // 2) Build horizontal projection profile
-    final List<int> rowInk = List.filled(height, 0);
-    for (int y = 0; y < height; y++) {
-      int ink = 0;
-      for (int x = 0; x < width; x++) {
+    for (var y = 0; y < h; y++) {
+      var ink = 0;
+      for (var x = 0; x < w; x++) {
         final p = down.getPixel(x, y);
         final luma = (0.2126 * img.getRed(p) +
             0.7152 * img.getGreen(p) +
-            0.0722 * img.getBlue(p)).round();
-        // count “ink” pixels – tune threshold if needed
+            0.0722 * img.getBlue(p))
+            .round();
         if (luma < 200) ink++;
       }
       rowInk[y] = ink;
     }
 
-    // 3) Threshold projection → contiguous bands = text lines
-    const minInkPerRow = 0.03; // 3% of pixels are dark
+    const minInkFrac = 0.03;
     final lines = <RectBox>[];
     int? startY;
-    for (int y = 0; y < height; y++) {
-      final hasInk = rowInk[y] > minInkPerRow * width;
+    for (var y = 0; y < h; y++) {
+      final hasInk = rowInk[y] > minInkFrac * w;
       if (hasInk && startY == null) startY = y;
       if (!hasInk && startY != null) {
-        final h = y - startY;
-        if (h > 10) { // filter tiny noise
-          lines.add(RectBox(0, startY * 2, image.width, h * 2)); // *2 because of downsampling
+        final height = y - startY;
+        if (height > 10) {
+          lines.add(RectBox(0, startY * 2, image.width, height * 2));
         }
         startY = null;
       }
     }
-    if (startY != null && height - startY > 10) {
-      lines.add(RectBox(0, startY * 2, image.width, (height - startY) * 2));
+    if (startY != null && h - startY > 10) {
+      lines.add(RectBox(0, startY * 2, image.width, (h - startY) * 2));
     }
-
-    // Sort top-to-bottom
     lines.sort((a, b) => a.y.compareTo(b.y));
     return lines;
   }
 
-  /// Converts a 128x800 grayscale image into a Float32 4D array: [1, 128, 800, 1].
-  /// Values are normalized to [0..1].
-  List _buildInputTensor(img.Image grayscale) {
-    final w = grayscale.width;
-    final h = grayscale.height;
-
-    // We'll store the pixel data in a 4D list:
-    final inputShape  = _interpreter.getInputTensor(0).shape;   // [1,128,800,1]
-    final input  = Float32List(inputShape.reduce((a,b)=>a*b))
-        .reshape(inputShape);
-
-    for (int y = 0; y < h; y++) {
-      for (int x = 0; x < w; x++) {
-        final pixel = grayscale.getPixel(x, y);
-        final r = img.getRed(pixel); // grayscale => r=g=b
-        final normalized = r / 255.0;
-        input[0][y][x][0] = normalized;
+  // Build Float32List from grayscale 128×800 image
+  List<double> _buildInputList(img.Image gray) {
+    final list = <double>[];
+    for (var y = 0; y < gray.height; y++) {
+      for (var x = 0; x < gray.width; x++) {
+        final pixel = gray.getPixel(x, y);
+        list.add(img.getRed(pixel) / 255.0);
       }
     }
-    return input;
+    return list;
   }
 
-  /// Greedy decode for a CTC output. We assume output shape of [1, T, vocabSize].
-  String _ctcGreedyDecode(List<List<List<double>>> outputData, List<int> outputShape) {
-    // For example, outputShape = [1, T, vocabSize].
-    final timeSteps = outputShape[1];
-    final vocabSize = outputShape[2];
+  // Reshape flat [1*T*V] → [1][T][V]
+  List<List<List<double>>> _reshapeFlatTo3D(
+      List<double> flat, int T, int V) {
+    var offset = 0;
+    final out = List.generate(
+        1,
+            (_) => List.generate(
+            T, (_) => List<double>.filled(V, 0.0),
+            growable: false),
+        growable: false);
+    for (var t = 0; t < T; t++) {
+      for (var v = 0; v < V; v++) {
+        out[0][t][v] = flat[offset++];
+      }
+    }
+    return out;
+  }
 
-    int prevToken = _blankIndex;
+  // CTC greedy decode
+  String _ctcGreedyDecode(
+      List<List<List<double>>> data, int T, int V) {
+    var prev = _blankIndex;
     final sb = StringBuffer();
-
-    for (int t = 0; t < timeSteps; t++) {
-      double maxVal = double.negativeInfinity;
-      int argMax = 0;
-
-      // Find the argmax at this time step
-      for (int c = 0; c < vocabSize; c++) {
-        final val = outputData[0][t][c];
+    for (var t = 0; t < T; t++) {
+      var maxVal = double.negativeInfinity;
+      var argMax = 0;
+      for (var v = 0; v < V; v++) {
+        final val = data[0][t][v];
         if (val > maxVal) {
           maxVal = val;
-          argMax = c;
+          argMax = v;
         }
       }
-
-      // If argMax != blank && argMax != prevToken => emit
-      if (argMax != _blankIndex && argMax != prevToken) {
-        final ch = _charMap[argMax] ?? '';
-        sb.write(ch);
+      if (argMax != _blankIndex && argMax != prev) {
+        sb.write(_charMap[argMax] ?? '');
       }
-      prevToken = argMax;
+      prev = argMax;
     }
     return sb.toString();
   }

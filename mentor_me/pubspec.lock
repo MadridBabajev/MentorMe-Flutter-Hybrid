@@ -626,6 +626,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "5.1.1"
+  litert_flutter:
+    dependency: "direct main"
+    description:
+      name: litert_flutter
+      sha256: d62934e6c70568a2534cb426bd4da16622e767e33610c3d1391ede82cc7f59cd
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.0.1"
   logger:
     dependency: "direct main"
     description:
@@ -802,14 +810,6 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.5.0"
-  quiver:
-    dependency: transitive
-    description:
-      name: quiver
-      sha256: ea0b925899e64ecdfbf9c7becb60d5b50e706ade44a85b2363be2a22d88117d2
-      url: "https://pub.dev"
-    source: hosted
-    version: "3.2.2"
   riverpod:
     dependency: transitive
     description:
@@ -951,14 +951,6 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "0.7.3"
-  tflite_flutter:
-    dependency: "direct main"
-    description:
-      name: tflite_flutter
-      sha256: "48e6fde2ad97162bb66a16a142f4c4698add9e8cd397ce9d1cc7451b55537ac1"
-      url: "https://pub.dev"
-    source: hosted
-    version: "0.11.0"
   timing:
     dependency: transitive
     description:

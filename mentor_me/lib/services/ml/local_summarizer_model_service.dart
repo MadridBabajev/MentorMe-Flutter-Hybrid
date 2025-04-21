@@ -6,19 +6,17 @@ import 'package:mentor_me/litert_flutter.dart';
 
 class LocalSummarizerModelService {
   final _liteRt = LiteRtFlutter();
+  static const _summarizerAsset = 'assets/ml_models/summarization/summarization_model.tflite';
   // late final SentencePieceProcessor _sp;
   bool _isLoaded = false;
   bool _isRunning = false;
 
   /// Call once to init LiteRT & load model + tokenizer.
-  Future<void> loadModel({
-    String modelAssetPath = 'assets/ml_models/summarization/summarization_model.tflite',
-    String spModelAssetPath = 'assets/ml_models/summarization/sentencepiece.bpe.model',
-  }) async {
+  Future<void> loadModel() async {
     if (_isLoaded) return;
     // 1) LiteRT init & model load
     await _liteRt.initialize();
-    await _liteRt.loadModel(modelAssetPath);
+    await _liteRt.loadModel(_summarizerAsset);
     //
     // // 2) load tokenizer JSON via `tokenizers` package
     // //    (that supports your T5 SentencePiece vocab + merges)

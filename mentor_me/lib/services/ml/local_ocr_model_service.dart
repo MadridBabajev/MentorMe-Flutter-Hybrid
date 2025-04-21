@@ -10,6 +10,7 @@ class RectBox {
 
 class LocalOcrModelService {
   final _liteRt = LiteRtFlutter();
+  static const _ocrAsset = 'assets/ml_models/ocr/ocr_model.tflite';
   bool _isLoaded = false;
   bool _isRunningInference = false;
 
@@ -37,10 +38,10 @@ class LocalOcrModelService {
   final int _blankIndex = 0;
 
   /// Initialize LiteRT runtime & load your .tflite from assets.
-  Future<void> loadModel({String assetPath = 'assets/ml_models/ocr/ocr_model.tflite'}) async {
+  Future<void> loadModel() async {
     if (_isLoaded) return;
     await _liteRt.initialize();
-    await _liteRt.loadModel(assetPath);
+    await _liteRt.loadModel(_ocrAsset);
     _isLoaded = true;
   }
 
@@ -83,9 +84,10 @@ class LocalOcrModelService {
 
         // run inference via LiteRT
         final flatOut = await _liteRt.runInference(
-          input: input,
-          inShape: inShape,
-          outShape: outShape,
+          assetPath: _ocrAsset,
+          input: input,       // your List<double>
+          inShape: inShape,   // e.g. [1,128,800,1]
+          outShape: outShape, // e.g. [1,50,vocabSize]
         );
 
         // reshape and decode

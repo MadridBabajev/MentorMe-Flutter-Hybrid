@@ -3,22 +3,18 @@ import 'package:flutter/services.dart';
 class LiteRtFlutter {
   static const _channel = MethodChannel('litert_flutter');
 
-  /// Must be called once, before any other calls.
   Future<void> initialize() async {
     await _channel.invokeMethod('initialize');
   }
 
-  /// Load your TFLite file from assets.
+  /// Now takes the assetPath so the plugin can key its interpreters map.
   Future<void> loadModel(String assetPath) async {
-    await _channel.invokeMethod('loadModel', {'assetPath': assetPath});
+    await _channel.invokeMethod('loadModel', { 'assetPath': assetPath });
   }
 
-  /// Run a single inference.
-  /// - `input`: flattened list of doubles.
-  /// - `inShape`: shape of input tensor.
-  /// - `outShape`: shape of output tensor.
-  /// Returns a flattened list of doubles.
+  /// Pass the same assetPath here.
   Future<List<double>> runInference({
+    required String assetPath,
     required List<double> input,
     required List<int> inShape,
     required List<int> outShape,
@@ -26,6 +22,7 @@ class LiteRtFlutter {
     final result = await _channel.invokeMethod<List<dynamic>>(
       'runInference',
       {
+        'assetPath': assetPath,
         'input': input,
         'inShape': inShape,
         'outShape': outShape,

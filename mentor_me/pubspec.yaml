@@ -35,9 +35,7 @@ dependencies:
   image: ^3.3.0
   image_picker: ^1.1.2
   litert_flutter: ^0.0.1
-#  sentencepiece_dart:
-#    git:
-#      url: https://github.com/Sid911/sentencepiece_dart.git
+  flutter_js: ^0.8.2
 
 dev_dependencies:
   flutter_test:
@@ -54,3 +52,5 @@ flutter:
     - assets/animations/loading.json
     - assets/ml_models/ocr/ocr_model.tflite
     - assets/ml_models/summarization/summarization_model.tflite
+    - assets/ml_models/summarization/tokenizer/tokenizer.json
+    - assets/js/transformers.bundle.js

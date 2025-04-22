@@ -1,6 +1,6 @@
 import 'dart:io';
 import 'package:image/image.dart' as img;
-import 'package:mentor_me/litert_flutter.dart';
+import 'package:mentor_me/services/ml/litert_flutter.dart';
 
 /// Simple bounding box for line detection.
 class RectBox {
@@ -10,7 +10,7 @@ class RectBox {
 
 class LocalOcrModelService {
   final _liteRt = LiteRtFlutter();
-  static const _ocrAsset = 'assets/ml_models/ocr/ocr_model.tflite';
+  static const _modelPath = 'assets/ml_models/ocr/ocr_model.tflite';
   bool _isLoaded = false;
   bool _isRunningInference = false;
 
@@ -37,22 +37,20 @@ class LocalOcrModelService {
   // Adjust if your model's blank token is a different index
   final int _blankIndex = 0;
 
+  bool get isModelLoaded => _isLoaded;
+  bool get isRunningInference => _isRunningInference;
+
   /// Initialize LiteRT runtime & load your .tflite from assets.
   Future<void> loadModel() async {
     if (_isLoaded) return;
     await _liteRt.initialize();
-    await _liteRt.loadModel(_ocrAsset);
+    await _liteRt.loadModel(_modelPath);
     _isLoaded = true;
   }
 
-  bool get isModelLoaded => _isLoaded;
-  bool get isRunningInference => _isRunningInference;
-
   /// Runs OCR: line‑detect → crop/resize → runInference → CTC decode
   Future<List<String>> extractHandwrittenText(File imageFile) async {
-    if (!_isLoaded) {
-      throw Exception('OCR model not loaded. Call loadModel() first.');
-    }
+    if (!_isLoaded) throw StateError('OCR model not loaded. Call loadModel() first.');
     _isRunningInference = true;
 
     try {
@@ -84,8 +82,8 @@ class LocalOcrModelService {
 
         // run inference via LiteRT
         final flatOut = await _liteRt.runInference(
-          assetPath: _ocrAsset,
-          input: input,       // your List<double>
+          assetPath: _modelPath,
+          input: input,       // List<double>
           inShape: inShape,   // e.g. [1,128,800,1]
           outShape: outShape, // e.g. [1,50,vocabSize]
         );

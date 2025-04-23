@@ -159,26 +159,16 @@ class _MlFeaturesViewState extends ConsumerState<MlFeaturesView> {
 
               if (mlFeaturesState.summaryText.isNotEmpty) ...[
                 const SizedBox(height: 10),
-                Text(
-                  "Local Summarization result:",
-                  style: GoogleFonts.poppins(fontWeight: FontWeight.bold),
-                ),
-                Text(
-                  mlFeaturesState.summaryText,
-                  style: GoogleFonts.poppins(),
-                ),
+                Text("Local Summarization result:",
+                    style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+                Text(mlFeaturesState.summaryText, style: GoogleFonts.poppins()),
               ],
 
               if (mlFeaturesState.combinedText.isNotEmpty) ...[
                 const SizedBox(height: 10),
-                Text(
-                  "Local OCR+Summarization combined:",
-                  style: GoogleFonts.poppins(fontWeight: FontWeight.bold),
-                ),
-                Text(
-                  mlFeaturesState.combinedText,
-                  style: GoogleFonts.poppins(),
-                ),
+                Text("Local OCR+Summarization combined:",
+                    style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+                Text(mlFeaturesState.combinedText, style: GoogleFonts.poppins()),
               ],
             ],
           ),

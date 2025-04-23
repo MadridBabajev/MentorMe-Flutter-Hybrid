@@ -40,7 +40,7 @@ class LocalOcrModelService {
   bool get isModelLoaded => _isLoaded;
   bool get isRunningInference => _isRunningInference;
 
-  /// Initialize LiteRT runtime & load your .tflite from assets.
+  /// Initialize LiteRT runtime & load model from assets.
   Future<void> loadModel() async {
     if (_isLoaded) return;
     await _liteRt.initialize();
@@ -81,7 +81,7 @@ class LocalOcrModelService {
         final outShape = [1, timeSteps, vocabSize];
 
         // run inference via LiteRT
-        final flatOut = await _liteRt.runInference(
+        final flatOut = await _liteRt.runOcrInference(
           assetPath: _modelPath,
           input: input,       // List<double>
           inShape: inShape,   // e.g. [1,128,800,1]

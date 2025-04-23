@@ -40,7 +40,6 @@ class LitertFlutterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                         .addOnSuccessListener { result.success(null) }
                         .addOnFailureListener { e -> result.error("INIT_FAILED", e.message, null) }
                 }
-
                 // loadModel now remembers the interpreter under its assetPath key
                 "loadModel" -> {
                     val assetPath = call.argument<String>("assetPath")!!
@@ -56,9 +55,25 @@ class LitertFlutterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                     interpreters[assetPath] = interp
                     result.success(null)
                 }
+                "getInputShape" -> {
+                    val assetPath = call.argument<String>("assetPath")!!
+                    val idx = call.argument<Int>("tensorIndex")!!
+                    val interp = interpreters[assetPath]
+                        ?: error("Model not loaded: $assetPath")
+                    val shape = interp.getInputTensor(idx).shape()
+                    result.success(shape.toList())
+                }
 
+                "getOutputShape" -> {
+                    val assetPath = call.argument<String>("assetPath")!!
+                    val idx = call.argument<Int>("tensorIndex")!!
+                    val interp = interpreters[assetPath]
+                        ?: error("Model not loaded: $assetPath")
+                    val shape = interp.getOutputTensor(idx).shape()
+                    result.success(shape.toList())
+                }
                 // runInference takes an extra assetPath argument and picks the correct interpreter
-                "runInference" -> {
+                "runOcrInference" -> {
                     val assetPath = call.argument<String>("assetPath")!!
                     val interpreter = interpreters[assetPath]
                         ?: error("Model not loaded: $assetPath")
@@ -99,6 +114,55 @@ class LitertFlutterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                         else -> throw IllegalArgumentException("Unsupported output data type: $outType")
                     }
                     result.success(resultList)
+                }
+                "runSummarizationStep" -> {
+                    // 1) unpack arguments
+                    @Suppress("UNCHECKED_CAST")
+                    val args = call.arguments as Map<String, *>
+                    val assetPath = args["assetPath"] as String
+                    val inputsRaw = args["inputs"] as List<List<Double>>
+                    val shapesRaw = args["inputShapes"] as List<List<Int>>
+                    val interp = interpreters[assetPath]
+                        ?: error("Model not loaded: $assetPath")
+
+                    // 2) build one ByteBuffer per input
+                    val inputBuffers = inputsRaw.mapIndexed { i, list ->
+                        val buf = ByteBuffer.allocateDirect(list.size * 4)
+                            .order(ByteOrder.nativeOrder())
+                        when (interp.getInputTensor(i).dataType()) {
+                            DataType.FLOAT32 -> list.forEach { buf.putFloat(it.toFloat()) }
+                            DataType.INT32   -> list.forEach { buf.putInt(it.toInt()) }
+                            else -> throw IllegalArgumentException("Unsupported input type")
+                        }
+                        buf.rewind()
+                        buf
+                    }.toTypedArray()
+
+                    // 3) figure out output dims [1, decLen, vocabSize]
+                    val outShape = interp.getOutputTensor(0).shape()
+                    val decLen = outShape[1]
+                    val vocabSize = outShape[2]
+                    val outBuf = ByteBuffer.allocateDirect(decLen * vocabSize * 4)
+                        .order(ByteOrder.nativeOrder())
+
+                    // 4) run
+                    interp.runForMultipleInputsOutputs(inputBuffers, mapOf(0 to outBuf))
+                    outBuf.rewind()
+
+                    // 5) argmax on last timestep
+                    val offset = (decLen - 1) * vocabSize
+                    var maxVal = Float.NEGATIVE_INFINITY
+                    var argMax = 0
+                    for (i in 0 until vocabSize) {
+                        val v = outBuf.getFloat((offset + i) * 4)
+                        if (v > maxVal) {
+                            maxVal = v
+                            argMax = i
+                        }
+                    }
+
+                    // 6) return single token id
+                    result.success(argMax)
                 }
 
                 else -> result.notImplemented()

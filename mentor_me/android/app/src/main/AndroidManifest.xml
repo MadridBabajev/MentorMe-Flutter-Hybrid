@@ -2,8 +2,9 @@
     <uses-permission android:name="android.permission.INTERNET"/>
     <application
         android:label="mentor_me"
+        android:icon="@mipmap/ic_launcher"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:largeHeap="true">
         <activity
             android:name=".MainActivity"
             android:exported="true"

@@ -52,6 +52,7 @@ class LitertFlutterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                         .addDelegate(FlexDelegate())
 
                     val interp = InterpreterApi.create(modelBuffer, options)
+                    interp.allocateTensors()
                     interpreters[assetPath] = interp
                     result.success(null)
                 }
@@ -115,54 +116,48 @@ class LitertFlutterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                     }
                     result.success(resultList)
                 }
-                "runSummarizationStep" -> {
-                    // 1) unpack arguments
+                "runFullSummarization" -> {
                     @Suppress("UNCHECKED_CAST")
                     val args = call.arguments as Map<String, *>
                     val assetPath = args["assetPath"] as String
                     val inputsRaw = args["inputs"] as List<List<Double>>
-                    val shapesRaw = args["inputShapes"] as List<List<Int>>
                     val interp = interpreters[assetPath]
                         ?: error("Model not loaded: $assetPath")
 
-                    // 2) build one ByteBuffer per input
+                    // build one ByteBuffer per input
                     val inputBuffers = inputsRaw.mapIndexed { i, list ->
                         val buf = ByteBuffer.allocateDirect(list.size * 4)
                             .order(ByteOrder.nativeOrder())
                         when (interp.getInputTensor(i).dataType()) {
                             DataType.FLOAT32 -> list.forEach { buf.putFloat(it.toFloat()) }
-                            DataType.INT32   -> list.forEach { buf.putInt(it.toInt()) }
+                            DataType.INT32 -> list.forEach { buf.putInt(it.toInt()) }
                             else -> throw IllegalArgumentException("Unsupported input type")
                         }
                         buf.rewind()
                         buf
                     }.toTypedArray()
 
-                    // 3) figure out output dims [1, decLen, vocabSize]
-                    val outShape = interp.getOutputTensor(0).shape()
+                    // We have exactly ONE output ("logits"), which is slot #0.
+                    // Grab its shape to size the buffer:
+                    val outShape = interp.getOutputTensor(0).shape()  // e.g. [1, decLen, vocabSize]
                     val decLen = outShape[1]
                     val vocabSize = outShape[2]
-                    val outBuf = ByteBuffer.allocateDirect(decLen * vocabSize * 4)
-                        .order(ByteOrder.nativeOrder())
+                    val outBuf = ByteBuffer.allocateDirect(decLen * vocabSize * 4).order(ByteOrder.nativeOrder())
 
-                    // 4) run
-                    interp.runForMultipleInputsOutputs(inputBuffers, mapOf(0 to outBuf))
+                    // **Crucial change**: map slot 0 → our buffer
+                    interp.runForMultipleInputsOutputs(
+                        /* inputs=  */ inputBuffers,
+                        /* outputs= */ mapOf(0 to outBuf)
+                    )
                     outBuf.rewind()
 
-                    // 5) argmax on last timestep
-                    val offset = (decLen - 1) * vocabSize
-                    var maxVal = Float.NEGATIVE_INFINITY
-                    var argMax = 0
-                    for (i in 0 until vocabSize) {
-                        val v = outBuf.getFloat((offset + i) * 4)
-                        if (v > maxVal) {
-                            maxVal = v
-                            argMax = i
-                        }
+                    // extract all logits as floats
+                    val total = decLen * vocabSize
+                    val flat = FloatArray(total)
+                    for (i in 0 until total) {
+                        flat[i] = outBuf.getFloat()
                     }
-
-                    // 6) return single token id
-                    result.success(argMax)
+                    result.success(flat.toList())
                 }
 
                 else -> result.notImplemented()

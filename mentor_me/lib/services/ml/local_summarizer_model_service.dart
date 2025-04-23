@@ -27,48 +27,35 @@ class LocalSummarizerModelService {
   /// Summarize a single chunk of text with naive greedy decoding, matching React logic.
   Future<String> summarizeText(
       String inputText, {
-        int maxInputTokens = 512,
+        int maxInputTokens = 256,
         int maxNewTokens = 50,
       }) async {
     if (!_isLoaded) throw StateError('Call loadModel() first.');
 
-    // 1) Prefix
+    // 1) Prefix + tokenize
     final prompt = 'summarize: $inputText';
-    AppLogger().logInfo(prompt);
+    final encResp = await _dio.post('/encode', data: { 'text': prompt });
+    List<int> inputIds = List<int>.from(encResp.data['input_ids']);
+    List<int> attentionMask = List<int>.from(encResp.data['attention_mask']);
 
-    // 2) Tokenize
-    final encResp = await _dio.post(
-      '/encode',
-      data: {'text': prompt, 'max_length': maxInputTokens},
-    );
-    List<int> inputIds = (encResp.data['input_ids'] as List<dynamic>).cast<int>();
-    List<int> attentionMask = (encResp.data['attention_mask'] as List<dynamic>).cast<int>();
-
-    AppLogger().logInfo('encode → inputIds.length=${inputIds.length}, attentionMask.length=${attentionMask.length}');
-    // 3) Discover TFLite’s fixed input shapes
-    final encShape =
-    await _liteRt.getInputShape(_modelAssetPath, /*encoder_input_ids*/ 0);
-    final maskShape =
-    await _liteRt.getInputShape(_modelAssetPath, /*encoder_mask*/ 1);
-    final decShape =
-    await _liteRt.getInputShape(_modelAssetPath, /*decoder_input_ids*/ 2);
-
+    // 2) Get TFLite input shapes
+    final encShape = await _liteRt.getInputShape(_modelAssetPath, 0);
+    final maskShape = await _liteRt.getInputShape(_modelAssetPath, 1);
+    final decShape = await _liteRt.getInputShape(_modelAssetPath, 2);
     final encLen = encShape.length > 1 ? encShape[1] : inputIds.length;
     final maskLen = maskShape.length > 1 ? maskShape[1] : attentionMask.length;
-    final decLen = decShape.length > 1 ? decShape[1] : maxNewTokens + 1;
-
-    AppLogger().logInfo('shapes → encLen=$encLen, maskLen=$maskLen, decLen=$decLen');
+    final decoderLen = decShape.length > 1 ? decShape[1] : maxNewTokens + 1;
 
     const padTokenId = 0;
     const eosTokenId = 1;
 
-    // 4) Pad/truncate encoder inputs
+    // 3) Pad/truncate encoder inputs
     if (inputIds.length > encLen) {
       inputIds = inputIds.sublist(0, encLen);
     } else if (inputIds.length < encLen) {
       inputIds = [
         ...inputIds,
-        ...List.filled(encLen - inputIds.length, padTokenId)
+        ...List.filled(encLen - inputIds.length, padTokenId),
       ];
     }
     if (attentionMask.length > maskLen) {
@@ -76,54 +63,69 @@ class LocalSummarizerModelService {
     } else if (attentionMask.length < maskLen) {
       attentionMask = [
         ...attentionMask,
-        ...List.filled(maskLen - attentionMask.length, 0)
+        ...List.filled(maskLen - attentionMask.length, 0),
       ];
     }
 
-    // 5) Iterative greedy decode
-    List<int> outputIds = [padTokenId];
+    // 4) Build the single-shot inputs & shapes
+    final decInputIds = List<int>.filled(decoderLen, padTokenId);
+    final List<List<double>> inputsList = [
+      inputIds.map((e) => e.toDouble()).toList(),
+      attentionMask.map((e) => e.toDouble()).toList(),
+      decInputIds.map((e) => e.toDouble()).toList(),
+    ];
+    final List<List<int>> shapesList = [
+      [1, encLen],
+      [1, maskLen],
+      [1, decoderLen],
+    ];
+
+    // 5) Iterative autoregressive decoding
+    // Prepare constant encoder inputs as doubles
+    final encInputD = inputIds.map((e) => e.toDouble()).toList();
+    final attMaskD = attentionMask.map((e) => e.toDouble()).toList();
+
+    // Decoder buffer, always length = decoderLen, initialized to all-pad
+    final decBuffer = List<int>.filled(decoderLen, padTokenId);
+    final List<int> generatedIds = [];
+
     for (var step = 0; step < maxNewTokens; step++) {
-      print("=== Step $step ===");
-      // pad/truncate decoder inputs
-      final decInputIds = outputIds.length > decLen
-          ? outputIds.sublist(0, decLen)
-          : [
-        ...outputIds,
-        ...List.filled(decLen - outputIds.length, padTokenId)
-      ];
+      // Build inputs for this step
+      final decInputD = decBuffer.map((e) => e.toDouble()).toList();
+      final inputsStep = <List<double>>[encInputD, attMaskD, decInputD];
 
-      print('decoderInputIds: (${decInputIds.length}); ${decInputIds.take(10).toList()}${decInputIds.length>10?"…":""}');
-
-      // build inputs as doubles
-      final inputs = [
-        inputIds.map((e) => e.toDouble()).toList(),
-        attentionMask.map((e) => e.toDouble()).toList(),
-        decInputIds.map((e) => e.toDouble()).toList(),
-      ];
-      final shapes = [
-        [1, encLen],
-        [1, maskLen],
-        [1, decLen],
-      ];
-
-      // fetch just the next token
-      final nextToken = await _liteRt.runSummarizationStep(
+      // Run the model once
+      final flatLogits = await _liteRt.runFullSummarization(
         assetPath: _modelAssetPath,
-        inputs: inputs,
-        inputShapes: shapes,
+        inputs: inputsStep,
+        inputShapes: shapesList, // shapesList unchanged
       );
-      print('nextToken = $nextToken');
 
+      // Determine vocab size from returned flat logits
+      final vocabSize = flatLogits.length ~/ decoderLen;
+      // Look only at this step’s slice of the logits
+      final base = step * vocabSize;
+
+      // Argmax over that slice
+      var maxVal = double.negativeInfinity;
+      var nextToken = padTokenId;
+      for (var v = 0; v < vocabSize; v++) {
+        final val = flatLogits[base + v];
+        if (val > maxVal) {
+          maxVal = val;
+          nextToken = v;
+        }
+      }
+      // Stop on EOS
       if (nextToken == eosTokenId) break;
-      outputIds.add(nextToken);
+
+      // Record and feed back
+      generatedIds.add(nextToken);
+      decBuffer[step + 1] = nextToken;
     }
 
-    // 6) Decode the final ids (skipping the initial pad)
-    final decResp = await _dio.post('/decode', data: {
-      'ids': outputIds.sublist(1),
-      'skip_special_tokens': true,
-    });
-    AppLogger().logInfo('decode → returned text: "${decResp.data['text']}"');
+    // 7) Decode via your tokenizer service
+    final decResp = await _dio.post('/decode', data: {'ids': generatedIds});
     return decResp.data['text'] as String;
   }
 
@@ -134,43 +136,36 @@ class LocalSummarizerModelService {
         int summaryTokens = 50,
       }) async {
     if (!_isLoaded) throw StateError('Call loadModel() before inference.');
-    AppLogger().logInfo('full text length = ${text.length}');
-    // 1) Full encode
-    final fullEnc = await _dio.post('/encode', data: {'text': text});
-    final allIds = (fullEnc.data['input_ids'] as List<dynamic>).cast<int>();
-    AppLogger().logInfo('total tokens = ${allIds.length}');
+    print('full text length = ${text.length}');
 
-    // 2) Summarize each chunk
+    // 1) Full encode → total token count
+    final fullEnc = await _dio.post('/encode', data: {'text': text});
+    final allIds = (fullEnc.data['input_ids'] as List).cast<int>();
+    print('total tokens = ${allIds.length}');
+
+    // 2) Summarize each token-slice
     final partials = <String>[];
     for (var i = 0; i < allIds.length; i += maxChunkTokens) {
       final end = (i + maxChunkTokens).clamp(0, allIds.length);
       final sliceIds = allIds.sublist(i, end);
 
-      print('--- chunk for tokens [$i..$end) → length ${sliceIds.length} ---');
       // decode chunk back to text
-      final chunkDec = await _dio.post(
-        '/decode',
-        data: {'ids': sliceIds, 'skip_special_tokens': true},
-      );
+      final chunkDec = await _dio.post('/decode', data: {'ids': sliceIds});
       final chunkText = chunkDec.data['text'] as String;
       print('chunkText: "$chunkText"');
 
-      final partialSummary = await summarizeText(
+      final partial = await summarizeText(
         chunkText,
         maxInputTokens: maxChunkTokens,
         maxNewTokens: summaryTokens,
       );
-      print('partialSummary: "$partialSummary"');
-      partials.add(partialSummary);
+      print('partialSummary: "$partial"');
+      partials.add(partial);
     }
 
-    // 3) Merge & final summarize
-    final merged = await summarizeText(
-      partials.join(' '),
-      maxInputTokens: maxChunkTokens,
-      maxNewTokens: summaryTokens,
-    );
-    AppLogger().logInfo('Final merged summary: "$merged"');
+    // 4) Otherwise merge them
+    final merged = partials.join(' ');
+    print('Final merged summary: "$merged"');
     return merged;
   }
 }

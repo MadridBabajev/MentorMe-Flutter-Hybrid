@@ -1,4 +1,5 @@
 import 'package:dio/dio.dart';
+import 'package:mentor_me/common/logger/logger.dart';
 import 'package:mentor_me/services/ml/litert_flutter.dart';
 
 class LocalSummarizerModelService {
@@ -86,12 +87,10 @@ class LocalSummarizerModelService {
         int summaryTokens = 50,
       }) async {
     if (!_isLoaded) throw StateError('Call loadModel() before inference.');
-    print('full text length = ${text.length}');
 
     // 1) Full encode → total token count
     final fullEnc = await _dio.post('/encode', data: {'text': text});
     final allIds = (fullEnc.data['input_ids'] as List).cast<int>();
-    print('total tokens = ${allIds.length}');
 
     // 2) Summarize each token-slice
     final partials = <String>[];
@@ -102,20 +101,19 @@ class LocalSummarizerModelService {
       // decode chunk back to text
       final chunkDec = await _dio.post('/decode', data: {'ids': sliceIds});
       final chunkText = chunkDec.data['text'] as String;
-      print('chunkText: "$chunkText"');
 
       final partial = await summarizeText(
         chunkText,
         maxInputTokens: maxChunkTokens,
         maxNewTokens: summaryTokens,
       );
-      print('partialSummary: "$partial"');
+      AppLogger().logInfo('partialSummary: "$partial"');
       partials.add(partial);
     }
 
     // 4) Otherwise merge them
     final merged = partials.join(' ');
-    print('Final merged summary: "$merged"');
+    AppLogger().logInfo('Final merged summary: "$merged"');
     return merged;
   }
 }

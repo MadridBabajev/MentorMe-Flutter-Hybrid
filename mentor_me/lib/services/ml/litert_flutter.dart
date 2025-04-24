@@ -36,17 +36,6 @@ class LiteRtFlutter {
     return shape!.cast<int>();
   }
 
-  Future<List<int>> getOutputShape(String assetPath, int tensorIndex) async {
-    final shape = await _channel.invokeMethod<List<dynamic>>(
-      'getOutputShape',
-      {
-        'assetPath': assetPath,
-        'tensorIndex': tensorIndex,
-      },
-    );
-    return shape!.cast<int>();
-  }
-
   /// Run one decoding step and get only the next token ID.
   /// Run the full decoder in one shot: returns a flat list of logits [decLen * vocabSize].
   Future<List<dynamic>> runSummarize({

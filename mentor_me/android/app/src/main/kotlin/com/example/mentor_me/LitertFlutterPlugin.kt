@@ -40,7 +40,6 @@ class LitertFlutterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                         .addOnSuccessListener { result.success(null) }
                         .addOnFailureListener { e -> result.error("INIT_FAILED", e.message, null) }
                 }
-                // loadModel now remembers the interpreter under its assetPath key
                 "loadModel" -> {
                     val assetPath = call.argument<String>("assetPath")!!
                     val rawAssetPath = flutterAssets.getAssetFilePathByName(assetPath)
@@ -51,6 +50,7 @@ class LitertFlutterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                         .setRuntime(InterpreterApi.Options.TfLiteRuntime.FROM_APPLICATION_ONLY)
                         .addDelegate(FlexDelegate())
 
+                    // Creates and remembers the interpreter under its assetPath key
                     val interp = InterpreterApi.create(modelBuffer, options)
                     interp.allocateTensors()
                     interpreters[assetPath] = interp
@@ -65,14 +65,6 @@ class LitertFlutterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                     result.success(shape.toList())
                 }
 
-                "getOutputShape" -> {
-                    val assetPath = call.argument<String>("assetPath")!!
-                    val idx = call.argument<Int>("tensorIndex")!!
-                    val interp = interpreters[assetPath]
-                        ?: error("Model not loaded: $assetPath")
-                    val shape = interp.getOutputTensor(idx).shape()
-                    result.success(shape.toList())
-                }
                 // runInference takes an extra assetPath argument and picks the correct interpreter
                 "runOcrInference" -> {
                     val assetPath = call.argument<String>("assetPath")!!

@@ -1,5 +1,4 @@
 import 'package:dio/dio.dart';
-import 'package:mentor_me/common/logger/logger.dart';
 import 'package:mentor_me/services/ml/litert_flutter.dart';
 
 class LocalSummarizerModelService {
@@ -41,10 +40,8 @@ class LocalSummarizerModelService {
     // 2) Get TFLite input shapes
     final encShape = await _liteRt.getInputShape(_modelAssetPath, 0);
     final maskShape = await _liteRt.getInputShape(_modelAssetPath, 1);
-    final decShape = await _liteRt.getInputShape(_modelAssetPath, 2);
     final encLen = encShape.length > 1 ? encShape[1] : inputIds.length;
     final maskLen = maskShape.length > 1 ? maskShape[1] : attentionMask.length;
-    final decoderLen = decShape.length > 1 ? decShape[1] : maxNewTokens + 1;
 
     const padTokenId = 0;
     const eosTokenId = 1;
@@ -67,65 +64,18 @@ class LocalSummarizerModelService {
       ];
     }
 
-    // 4) Build the single-shot inputs & shapes
-    final decInputIds = List<int>.filled(decoderLen, padTokenId);
-    final List<List<double>> inputsList = [
-      inputIds.map((e) => e.toDouble()).toList(),
-      attentionMask.map((e) => e.toDouble()).toList(),
-      decInputIds.map((e) => e.toDouble()).toList(),
-    ];
-    final List<List<int>> shapesList = [
-      [1, encLen],
-      [1, maskLen],
-      [1, decoderLen],
-    ];
+    // 4) One native plugin call does all the greedy decoding:
+    final generatedIds = await _liteRt.runSummarize(
+      assetPath: _modelAssetPath,
+      inputsIds: inputIds,
+      attentionMask: attentionMask,
+      maxNewTokens: maxNewTokens,
+      padTokenId: padTokenId,
+      eosTokenId: eosTokenId,
+    );
 
-    // 5) Iterative autoregressive decoding
-    // Prepare constant encoder inputs as doubles
-    final encInputD = inputIds.map((e) => e.toDouble()).toList();
-    final attMaskD = attentionMask.map((e) => e.toDouble()).toList();
-
-    // Decoder buffer, always length = decoderLen, initialized to all-pad
-    final decBuffer = List<int>.filled(decoderLen, padTokenId);
-    final List<int> generatedIds = [];
-
-    for (var step = 0; step < maxNewTokens; step++) {
-      // Build inputs for this step
-      final decInputD = decBuffer.map((e) => e.toDouble()).toList();
-      final inputsStep = <List<double>>[encInputD, attMaskD, decInputD];
-
-      // Run the model once
-      final flatLogits = await _liteRt.runFullSummarization(
-        assetPath: _modelAssetPath,
-        inputs: inputsStep,
-        inputShapes: shapesList, // shapesList unchanged
-      );
-
-      // Determine vocab size from returned flat logits
-      final vocabSize = flatLogits.length ~/ decoderLen;
-      // Look only at this step’s slice of the logits
-      final base = step * vocabSize;
-
-      // Argmax over that slice
-      var maxVal = double.negativeInfinity;
-      var nextToken = padTokenId;
-      for (var v = 0; v < vocabSize; v++) {
-        final val = flatLogits[base + v];
-        if (val > maxVal) {
-          maxVal = val;
-          nextToken = v;
-        }
-      }
-      // Stop on EOS
-      if (nextToken == eosTokenId) break;
-
-      // Record and feed back
-      generatedIds.add(nextToken);
-      decBuffer[step + 1] = nextToken;
-    }
-
-    // 7) Decode via your tokenizer service
-    final decResp = await _dio.post('/decode', data: {'ids': generatedIds});
+    // 6) Decode token IDs back to text
+    final decResp = await _dio.post('/decode', data: {'ids': generatedIds.cast<int>()},);
     return decResp.data['text'] as String;
   }
 

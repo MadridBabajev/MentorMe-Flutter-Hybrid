@@ -49,19 +49,24 @@ class LiteRtFlutter {
 
   /// Run one decoding step and get only the next token ID.
   /// Run the full decoder in one shot: returns a flat list of logits [decLen * vocabSize].
-  Future<List<double>> runFullSummarization({
+  Future<List<dynamic>> runSummarize({
     required String assetPath,
-    required List<List<double>> inputs,
-    required List<List<int>> inputShapes,
+    required List<int> inputsIds,
+    required List<int> attentionMask,
+    required int maxNewTokens,
+    required int padTokenId,
+    required int eosTokenId,
   }) async {
-    final result = await _channel.invokeMethod<List<dynamic>>(
-      'runFullSummarization',
+    return await _channel.invokeMethod<List<dynamic>>(
+      'runSummarize',
       {
         'assetPath': assetPath,
-        'inputs': inputs,
-        'inputShapes': inputShapes,
+        'inputIds': inputsIds,
+        'attentionMask': attentionMask,
+        'maxNewTokens': maxNewTokens,
+        'padTokenId': padTokenId,
+        'eosTokenId': eosTokenId,
       },
-    );
-    return result!.cast<double>();
+    ) as List<dynamic>;
   }
 }

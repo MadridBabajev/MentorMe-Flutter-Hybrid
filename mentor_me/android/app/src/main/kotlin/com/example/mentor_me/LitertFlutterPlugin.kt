@@ -116,48 +116,118 @@ class LitertFlutterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                     }
                     result.success(resultList)
                 }
-                "runFullSummarization" -> {
+                // New summarization method: returns List<Int> generated IDs
+                "runSummarize" -> {
                     @Suppress("UNCHECKED_CAST")
                     val args = call.arguments as Map<String, *>
-                    val assetPath = args["assetPath"] as String
-                    val inputsRaw = args["inputs"] as List<List<Double>>
+                    val assetPath    = args["assetPath"]     as String
+                    val rawEncIds    = (args["inputIds"]      as List<Int>).toIntArray()
+                    val rawAttMask   = (args["attentionMask"] as List<Int>).toIntArray()
+                    val maxNewTokens = args["maxNewTokens"]  as Int
+                    val padTokenId   = args["padTokenId"]    as Int
+                    val eosTokenId   = args["eosTokenId"]    as Int
+
                     val interp = interpreters[assetPath]
                         ?: error("Model not loaded: $assetPath")
 
-                    // build one ByteBuffer per input
-                    val inputBuffers = inputsRaw.mapIndexed { i, list ->
-                        val buf = ByteBuffer.allocateDirect(list.size * 4)
-                            .order(ByteOrder.nativeOrder())
-                        when (interp.getInputTensor(i).dataType()) {
-                            DataType.FLOAT32 -> list.forEach { buf.putFloat(it.toFloat()) }
-                            DataType.INT32 -> list.forEach { buf.putInt(it.toInt()) }
-                            else -> throw IllegalArgumentException("Unsupported input type")
-                        }
-                        buf.rewind()
-                        buf
-                    }.toTypedArray()
-
-                    // We have exactly ONE output ("logits"), which is slot #0.
-                    // Grab its shape to size the buffer:
-                    val outShape = interp.getOutputTensor(0).shape()  // e.g. [1, decLen, vocabSize]
-                    val decLen = outShape[1]
-                    val vocabSize = outShape[2]
-                    val outBuf = ByteBuffer.allocateDirect(decLen * vocabSize * 4).order(ByteOrder.nativeOrder())
-
-                    // **Crucial change**: map slot 0 → our buffer
-                    interp.runForMultipleInputsOutputs(
-                        /* inputs=  */ inputBuffers,
-                        /* outputs= */ mapOf(0 to outBuf)
+                    // --- figure out which slot is which ---
+                    val inputNames = listOf(
+                        interp.getInputTensor(0).name(),
+                        interp.getInputTensor(1).name(),
+                        interp.getInputTensor(2).name()
                     )
-                    outBuf.rewind()
+                    val encIndex  = inputNames.indexOfFirst  { it.contains("encoder_input_ids") }
+                        .takeIf { it >= 0 } ?: 0
+                    val maskIndex = inputNames.indexOfFirst  { it.contains("encoder_attention_mask") }
+                        .takeIf { it >= 0 } ?: 1
+                    val decIndex  = inputNames.indexOfFirst  { it.contains("decoder_input_ids") }
+                        .takeIf { it >= 0 } ?: 2
 
-                    // extract all logits as floats
-                    val total = decLen * vocabSize
-                    val flat = FloatArray(total)
-                    for (i in 0 until total) {
-                        flat[i] = outBuf.getFloat()
+                    // --- fetch the *true* shapes for each slot ---
+                    val encLen  = interp.getInputTensor(encIndex).shape()[1]
+                    val maskLen = interp.getInputTensor(maskIndex).shape()[1]
+                    val decLen  = interp.getInputTensor(decIndex).shape()[1]
+
+                    // --- helper to pad or truncate an IntArray to exactly targetLen ---
+                    fun padOrTruncate(arr: IntArray, targetLen: Int): IntArray {
+                        return when {
+                            arr.size > targetLen ->
+                                arr.copyOfRange(0, targetLen)
+                            arr.size < targetLen ->
+                                arr + IntArray(targetLen - arr.size) { padTokenId }
+                            else -> arr
+                        }
                     }
-                    result.success(flat.toList())
+
+                    // --- build final input arrays of the right length ---
+                    val encIds  = padOrTruncate(rawEncIds, encLen)
+                    val attMask = padOrTruncate(rawAttMask, maskLen)
+
+                    // --- build ByteBuffers ---
+                    fun makeBuffer(vals: IntArray, tensorIndex: Int): ByteBuffer {
+                        val tensor = interp.getInputTensor(tensorIndex)
+                        val bb = ByteBuffer.allocateDirect(vals.size * 4)
+                            .order(ByteOrder.nativeOrder())
+                        if (tensor.dataType() == DataType.INT32) for (v in vals) bb.putInt(v)
+                        else for (v in vals) bb.putFloat(v.toFloat())
+                        bb.rewind()
+                        return bb
+                    }
+
+                    val encBuf  = makeBuffer(encIds,  encIndex)
+                    val maskBuf = makeBuffer(attMask, maskIndex)
+
+                    // --- prepare decoder buffer and output ---
+                    val decBufArr = IntArray(decLen) { padTokenId }
+                    val generated = mutableListOf<Int>()
+
+                    val outShape  = interp.getOutputTensor(0).shape()   // [1, decLen, vocabSize]
+                    val vocabSize = outShape[2]
+                    val outBuf    = ByteBuffer.allocateDirect(decLen * vocabSize * 4)
+                        .order(ByteOrder.nativeOrder())
+
+                    // --- greedy decode ---
+                    for (step in 0 until maxNewTokens) {
+                        // rebuild decoder input
+                        val decBufBB = ByteBuffer.allocateDirect(decLen * 4)
+                            .order(ByteOrder.nativeOrder())
+                        val dTensor = interp.getInputTensor(decIndex)
+                        if (dTensor.dataType() == DataType.INT32) {
+                            decBufArr.forEach { decBufBB.putInt(it) }
+                        } else {
+                            decBufArr.forEach { decBufBB.putFloat(it.toFloat()) }
+                        }
+                        decBufBB.rewind()
+
+                        // assemble inputs in the correct order
+                        val inputs = arrayOfNulls<Any>(3)
+                        inputs[encIndex]  = encBuf
+                        inputs[maskIndex] = maskBuf
+                        inputs[decIndex]  = decBufBB
+
+                        // run interpreter
+                        outBuf.rewind()
+                        interp.runForMultipleInputsOutputs(inputs, mapOf(0 to outBuf))
+                        outBuf.rewind()
+
+                        // pick next token
+                        var best  = Float.NEGATIVE_INFINITY
+                        var argm  = padTokenId
+                        val base  = step * vocabSize
+                        for (v in 0 until vocabSize) {
+                            val f = outBuf.getFloat((base + v) * 4)
+                            if (f > best) {
+                                best = f
+                                argm = v
+                            }
+                        }
+                        if (argm == eosTokenId) break
+
+                        generated += argm
+                        decBufArr[step + 1] = argm
+                    }
+
+                    result.success(generated)
                 }
 
                 else -> result.notImplemented()

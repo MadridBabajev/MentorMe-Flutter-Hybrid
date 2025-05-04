@@ -58,4 +58,12 @@ class LiteRtFlutter {
       },
     ) as List<dynamic>;
   }
+
+  Future<Map<String, double>> getSystemMetrics() async {
+    final result = await _channel.invokeMethod<Map<dynamic, dynamic>>(
+      'getSystemMetrics',
+    );
+    // returns { "memoryMb": double, "cpuPct": double }
+    return result!.map((k, v) => MapEntry(k as String, (v as num).toDouble()));
+  }
 }

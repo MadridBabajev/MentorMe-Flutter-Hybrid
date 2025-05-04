@@ -1,6 +1,7 @@
 package com.example.mentor_me
 
 import android.content.Context
+import android.os.Debug
 import com.google.android.gms.tflite.java.TfLite
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.plugin.common.MethodCall
@@ -220,6 +221,21 @@ class LitertFlutterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                     }
 
                     result.success(generated)
+                }
+
+                "getSystemMetrics" -> {
+                    // Memory
+                    val memInfo = Debug.MemoryInfo()
+                    Debug.getMemoryInfo(memInfo)
+                    val totalPssKb = memInfo.totalPss // in KB
+
+                    // CPU: use /proc/stat delta or skip – simplest: report 0 here
+                    val cpuLoadPct = 0
+
+                    result.success(mapOf(
+                        "memoryMb" to totalPssKb / 1024.0,
+                        "cpuPct"    to cpuLoadPct.toDouble()
+                    ))
                 }
 
                 else -> result.notImplemented()

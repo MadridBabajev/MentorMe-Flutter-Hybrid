@@ -1,0 +1,13 @@
+{
+  "name": "t5-tokenizer-service",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "@xenova/transformers": "^2.17.2",
+    "cors": "^2.8.5",
+    "express": "^5.1.0"
+  }
+}

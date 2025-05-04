@@ -7,6 +7,7 @@ import 'package:mentor_me/pages/views/lessons/lesson_reservation_view.dart';
 import 'package:mentor_me/pages/views/lessons/lessons_list_view.dart';
 import 'package:mentor_me/pages/views/public/authorization_view.dart';
 import 'package:mentor_me/pages/views/public/home_view.dart';
+import 'package:mentor_me/pages/views/public/ml_features_view.dart';
 import 'package:mentor_me/pages/views/public/settings_view.dart';
 import 'package:mentor_me/pages/views/public/subjects/subject_details_view.dart';
 import 'package:mentor_me/pages/views/public/subjects/subjects_list_view.dart';
@@ -36,6 +37,7 @@ class AppBody extends ConsumerWidget {
           AppRoutes.tutorSearch: TutorSearchView(),
           AppRoutes.subjectList: SubjectsListView(),
           AppRoutes.subjectDetails: SubjectDetailsView(),
+          AppRoutes.mlFeatures: MlFeaturesView(),
           AppRoutes.lessonList: authState.isAuthorized ? LessonsListView() : HomeView(),
           AppRoutes.lessonDetails: authState.isAuthorized ? LessonDetailsView() : HomeView(),
           AppRoutes.lessonPayment: authState.isAuthorized ? LessonPaymentView() : HomeView(),

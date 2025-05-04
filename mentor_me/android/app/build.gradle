@@ -37,6 +37,25 @@ android {
             signingConfig = signingConfigs.debug
         }
     }
+
+    defaultConfig {
+        ndk { abiFilters "armeabi-v7a", "arm64-v8a", "x86_64" }
+    }
+
+    packagingOptions { pickFirst "**/*.so" }
+}
+
+dependencies {
+    implementation 'com.google.android.gms:play-services-tflite-java:16.4.0'
+    implementation 'com.google.android.gms:play-services-tflite-support:16.4.0'
+    implementation 'com.google.ai.edge.litert:litert-support-api:1.2.0'
+    implementation "org.tensorflow:tensorflow-lite:2.16.1"
+    implementation 'org.tensorflow:tensorflow-lite-select-tf-ops:2.16.1'
+}
+
+configurations.configureEach {
+    exclude group: 'org.tensorflow', module: 'tensorflow-lite-api'
+    exclude group: 'org.tensorflow', module: 'tensorflow-lite-support-api'
 }
 
 flutter {

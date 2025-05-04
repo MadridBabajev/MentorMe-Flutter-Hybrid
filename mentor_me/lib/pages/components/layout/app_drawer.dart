@@ -55,6 +55,8 @@ class AppDrawer extends ConsumerWidget {
                     AppRoutes.subjectList),
                 DrawerTile(translations.drawerTutorSearch, Icons.search,
                     AppRoutes.tutorSearch),
+                DrawerTile("ML features", Icons.adb,
+                    AppRoutes.mlFeatures),
                 const Divider(),
                 DrawerTile(translations.drawerAbout, Icons.info, AppRoutes.home),
               ],

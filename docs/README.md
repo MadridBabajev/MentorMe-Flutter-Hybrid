@@ -88,41 +88,37 @@ The models are located in the `mentor_me/assets/ml_models` directory.
 
 ## Application Snippets
 
-**Application's home screen:**
+**Application's home screen from a physical device:**
 
-<img src="./homescreen-physical.jpg" alt="MentorMe Home Screen" width="800" />
-
-**Subjects view as an unauthorized user:**
-
-<img src="./gifs/subjects-unauthorized.gif" alt="Unauthorized tabs" width="800" />
+<img src="./homescreen-physical.jpg" alt="MentorMe Home Screen" width="400" />
 
 **Filtering platform's tutors:**
 
-<img src="./gifs/filtering-tutors.gif" alt="Student actions" width="800" />
+<img src="./gifs/filtering-tutors.gif" alt="Student actions" width="400" />
 
 **Switching locale:**
 
-<img src="./gifs/switching-locale.gif" alt="Lesson reservation" width="800" />
+<img src="./gifs/switching-locale.gif" alt="Lesson reservation" width="400" />
 
 **User profile page and subjects:**
 
-<img src="./gifs/profile-and-subjects.gif" alt="Tutor actions" width="800" />
+<img src="./gifs/profile-and-subjects.gif" alt="Tutor actions" width="400" />
 
 **Lesson reservation:**
 
-<img src="./gifs/lesson-reservation.gif" alt="Tutor actions" width="800" />
+<img src="./gifs/lesson-reservation.gif" alt="Tutor actions" width="400" />
 
 **Lesson review:**
 
-<img src="./gifs/lesson-review.gif" alt="Tutor actions" width="800" />
+<img src="./gifs/lesson-review.gif" alt="Tutor actions" width="400" />
 
 **Lesson cancellation:**
 
-<img src="./gifs/lesson-cancellation.gif" alt="Tutor actions" width="800" />
+<img src="./gifs/lesson-cancellation.gif" alt="Tutor actions" width="400" />
 
 **Accepting lessons and adding tags:**
 
-<img src="./gifs/accepting-lessons-and-tags.gif" alt="Tutor actions" width="800" />
+<img src="./gifs/accepting-lessons-and-tags.gif" alt="Tutor actions" width="400" />
 
 ---
 

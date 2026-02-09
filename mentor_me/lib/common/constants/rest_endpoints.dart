@@ -1,6 +1,6 @@
 class RestEndpoints {
   // == Base URL ==
-  static const String hostBaseUrl = "http://10.0.2.2:8000/api/";
+  static const String hostBaseUrl = "http://10.0.2.2:80/api/";
 
   // == Controllers ==
   static const String accountController = "v1/identity/account/";

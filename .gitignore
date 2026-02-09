@@ -45,3 +45,6 @@ mentor_me/android/app/release
 #Sensitive info
 mentor_me/android/app/google-services.json
 mentor_me/ios/Runner/GoogleService-Info.plist
+
+# Sentencepiece tokenization service
+tokenization_service/node_modules
